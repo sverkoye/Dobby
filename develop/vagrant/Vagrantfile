@@ -21,6 +21,7 @@ Vagrantfile to configure a VirtualBox VM that can be used for Dobby development.
 Builds & installs the following components (plus dependencies):
   * Dobby (https://github.com/rdkcentral/Dobby/)
   * Crun (https://github.com/containers/crun)
+  * Smcroute (https://github.com/troglobit/smcroute)
   * Thunder (https://github.com/rdkcentral/Thunder)
   * OCIContainer NanoService (https://github.com/rdkcentral/rdkservices)
 ################################################################################
@@ -115,9 +116,9 @@ Vagrant.configure("2") do |config|
         cp /usr/lib/x86_64-linux-gnu/dbus-1.0/include/dbus/dbus-arch-deps.h /usr/include/dbus-1.0/dbus
 
         mkdir -p /usr/lib/plugins/dobby
-        mkdir -p /opt/persistent/sky
-        mkdir -p /var/volatile/sky/dobby/bundles
-        chmod 755 /var/volatile/sky/dobby/bundles
+        mkdir -p /opt/persistent/rdk
+        mkdir -p /var/volatile/rdk/dobby/bundles
+        chmod 755 /var/volatile/rdk/dobby/bundles
 
         # Hardcoded .so locations in the code so need to create a symlink
         ln -s /lib/x86_64-linux-gnu/libreadline.so.* /lib/
@@ -135,11 +136,34 @@ Vagrant.configure("2") do |config|
         figlet CRUN  # ASCII banner
         mkdir ~/crun
         cd ~/crun
-        git clone --depth 1 --branch 0.14.1 https://github.com/containers/crun.git .
+        git clone --depth 1 --branch 0.15 https://github.com/containers/crun.git .
+
+        # Apply patch for pid file not being created properly
+        cp /vagrant/0001-container-truncate-pid-file-before-writing-it.patch ./
+        patch -p1 < 0001-container-truncate-pid-file-before-writing-it.patch
+
         ./autogen.sh
         ./configure --disable-systemd
         sudo make install -j$(nproc)
         sudo ln -s /usr/local/bin/crun /usr/bin/crun
+    SHELL
+
+    ##################################################
+    #
+    # Clone and build SMCROUTE
+    #
+    config.vm.provision "shell", privileged: false, inline: <<-SHELL
+        figlet SMCROUTE  # ASCII banner
+        mkdir ~/smcroute
+        cd ~/smcroute
+        git clone --depth 1 --branch 2.4.4 https://github.com/troglobit/smcroute.git .
+
+        ./autogen.sh
+        ./configure
+        sudo make install -j$(nproc)
+        sudo ln -s /usr/local/sbin/smcroutectl /usr/sbin/smcroutectl
+        sudo mkdir -p /usr/local/var/run
+        sudo systemctl enable smcroute # enable the daemon by default
     SHELL
 
     ##################################################
@@ -192,7 +216,7 @@ Vagrant.configure("2") do |config|
     config.vm.provision "shell", inline: <<-SHELL
         figlet DBUS  # ASCII banner
         # FIXME - This is not secure - only for debugging
-        if [ ! -e "/etc/dbus-1/system.d/com.sky.dobby.conf" ]; then
+        if [ ! -e "/etc/dbus-1/system.d/org.rdk.dobby.conf" ]; then
             echo '
 <!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
     "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
@@ -208,7 +232,7 @@ Vagrant.configure("2") do |config|
     <allow user="*"/>
 </policy>
 </busconfig>
-' > "/etc/dbus-1/system.d/com.sky.dobby.conf"
+' > "/etc/dbus-1/system.d/org.rdk.dobby.conf"
         fi
     SHELL
 
